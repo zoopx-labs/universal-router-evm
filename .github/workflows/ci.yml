@@ -13,12 +13,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Foundry (direct download)
+      - name: Install Foundry (robust raw script)
         run: |
           set -euo pipefail
           mkdir -p "$HOME/.foundry/bin"
-          echo "Downloading foundryup tarball to $HOME/.foundry/bin"
-          curl -fsSL "https://github.com/foundry-rs/foundry/releases/latest/download/foundryup-x86_64-unknown-linux-gnu.tar.gz" | tar -xz -C "$HOME/.foundry/bin"
+          echo "Downloading raw foundryup script to $HOME/.foundry/bin/foundryup"
+          curl -fsSL "https://raw.githubusercontent.com/foundry-rs/foundry/master/foundryup/foundryup" -o "$HOME/.foundry/bin/foundryup"
           chmod +x "$HOME/.foundry/bin/foundryup"
           ls -la "$HOME/.foundry/bin" || true
           # Invoke foundryup to install toolchain
