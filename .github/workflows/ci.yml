@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Foundry
+        run: |
+          curl -L https://foundry.paradigm.xyz | bash
+          source ~/.bashrc || true
+          foundryup -y
+
+      - name: Install npm deps if present
+        run: |
+          if [ -f package.json ]; then npm ci; fi
+
+      - name: Run Forge tests
+        run: forge test --via-ir -v
+
+      - name: Run Slither (Docker)
+        run: |
+          mkdir -p results
+          docker run --rm -v ${{ github.workspace }}:/src -w /src ghcr.io/crytic/slither:latest \
+            slither --solc-remaps "@openzeppelin/=node_modules/@openzeppelin/" --json results/slither.json || true
+
+      - name: Upload Slither results
+        uses: actions/upload-artifact@v4
+        with:
+          name: slither-results
+          path: results/slither.json
