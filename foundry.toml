@@ -1,8 +1,5 @@
 [profile.default]
 viaIR = true
-optimizer = true
-optimizer_runs = 200
-[profile.default]
 src = 'contracts'
 test = 'foundry/test'
 out = 'out'
