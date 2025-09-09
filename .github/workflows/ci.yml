@@ -13,26 +13,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Foundry
+      - name: Install Foundry (direct download)
         run: |
-          # Install Foundry toolchain
-          curl -L https://foundry.paradigm.xyz | bash
-          # Debug: list homedir and foundry dir (will appear in runner logs)
-          ls -la $HOME || true
-          ls -la $HOME/.foundry || true
-          # Source shell rc to ensure foundryup is on PATH in this step
-          source $HOME/.bashrc || true
+          set -euo pipefail
+          mkdir -p "$HOME/.foundry/bin"
+          echo "Downloading foundryup tarball to $HOME/.foundry/bin"
+          curl -fsSL "https://github.com/foundry-rs/foundry/releases/latest/download/foundryup-x86_64-unknown-linux-gnu.tar.gz" | tar -xz -C "$HOME/.foundry/bin"
+          chmod +x "$HOME/.foundry/bin/foundryup"
+          ls -la "$HOME/.foundry/bin" || true
+          # Invoke foundryup to install toolchain
+          "$HOME/.foundry/bin/foundryup" -y
           # Add foundry binaries to PATH for subsequent steps
           echo "$HOME/.foundry/bin" >> $GITHUB_PATH
-          # Prefer direct call if present, otherwise fallback to foundryup if on PATH
-          if [ -x "$HOME/.foundry/bin/foundryup" ]; then
-            $HOME/.foundry/bin/foundryup -y
-          elif command -v foundryup >/dev/null 2>&1; then
-            foundryup -y
-          else
-            echo "foundryup not found after install" >&2
-            exit 1
-          fi
 
       - name: Install npm deps if present
         run: |
