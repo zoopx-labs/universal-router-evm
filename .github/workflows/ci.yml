@@ -15,8 +15,11 @@ jobs:
 
       - name: Install Foundry
         run: |
+          # Install Foundry toolchain
           curl -L https://foundry.paradigm.xyz | bash
-          source ~/.bashrc || true
+          # Add foundry binaries to PATH for subsequent steps
+          echo "$HOME/.foundry/bin" >> $GITHUB_PATH
+          # Ensure foundryup is available and upgrade/install toolchain
           foundryup -y
 
       - name: Install npm deps if present
