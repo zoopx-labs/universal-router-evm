@@ -443,29 +443,7 @@ contract Router is ReentrancyGuard, EIP712 {
         require(ok, "target call failed");
     }
 
-    function _verifyIntent(RouteIntent calldata intent, bytes calldata sig) internal view returns (bytes32) {
-        if (block.timestamp > intent.expiry) revert ExpiredIntent();
-        if (intent.payloadHash == bytes32(0)) revert PayloadTooLarge();
-
-        bytes32 structHash = keccak256(abi.encode(
-            ROUTE_INTENT_TYPEHASH,
-            intent.routeId,
-            intent.user,
-            intent.token,
-            intent.amount,
-            intent.protocolFee,
-            intent.relayerFee,
-            intent.dstChainId,
-            intent.recipient,
-            intent.expiry,
-            intent.payloadHash,
-            intent.nonce
-        ));
-        bytes32 digest = _hashTypedDataV4(structHash);
-        address recovered = ECDSA.recover(digest, sig);
-        if (recovered != intent.user) revert InvalidSignature();
-        return digest;
-    }
+    
 
     // New name requested by pre-testnet fixes: return the digest while performing the same checks.
     function _verifyIntentReturningDigest(RouteIntent calldata intent, bytes calldata sig)
