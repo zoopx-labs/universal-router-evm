@@ -17,10 +17,22 @@ jobs:
         run: |
           # Install Foundry toolchain
           curl -L https://foundry.paradigm.xyz | bash
+          # Debug: list homedir and foundry dir (will appear in runner logs)
+          ls -la $HOME || true
+          ls -la $HOME/.foundry || true
+          # Source shell rc to ensure foundryup is on PATH in this step
+          source $HOME/.bashrc || true
           # Add foundry binaries to PATH for subsequent steps
           echo "$HOME/.foundry/bin" >> $GITHUB_PATH
-          # Call foundryup directly from the installed location so it's available in this step
-          $HOME/.foundry/bin/foundryup -y
+          # Prefer direct call if present, otherwise fallback to foundryup if on PATH
+          if [ -x "$HOME/.foundry/bin/foundryup" ]; then
+            $HOME/.foundry/bin/foundryup -y
+          elif command -v foundryup >/dev/null 2>&1; then
+            foundryup -y
+          else
+            echo "foundryup not found after install" >&2
+            exit 1
+          fi
 
       - name: Install npm deps if present
         run: |
