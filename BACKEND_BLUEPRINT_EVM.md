@@ -6,15 +6,20 @@
 - `contracts/Router.sol` — Universal Router
   - **Entrypoints:**
     - `universalBridgeTransfer`, `universalBridgeTransferWithSig` (core bridging)
+  - `finalizeMessage` (destination finalizer called by adapter/relayer)
     - `setAdmin`, `setFeeRecipient`, `setAllowedTarget`, `setEnforceTargetAllowlist` (admin/config)
   - **Events:**
     - `BridgeInitiated(bytes32 routeId, address user, address token, address target, uint256 forwardedAmount, uint256 protocolFee, uint256 relayerFee, bytes32 payloadHash, uint16 srcChainId, uint16 dstChainId, uint64 nonce)`
+  - `UniversalBridgeInitiated(bytes32 routeId, bytes32 payloadHash, bytes32 messageHash, bytes32 globalRouteId, address user, address token, address target, uint256 forwardedAmount, uint256 protocolFee, uint256 relayerFee, uint16 srcChainId, uint16 dstChainId, uint64 nonce)` — canonical initiation event (use this as primary source of truth)
+  - `FeeApplied(bytes32 globalRouteId, bytes32 messageHash, uint16 chainId, address router, address vault, address asset, uint256 protocol_fee_native, uint256 relayer_fee_native, uint16 protocol_bps, uint16 lp_bps, address collector, uint256 applied_at)` — emitted by `finalizeMessage` after on-chain splits
     - `IntentConsumed(bytes32 digest, bytes32 routeId, address user)`
     - `AdminUpdated(address oldAdmin, address newAdmin)`
     - `FeeRecipientUpdated(address oldFeeRecipient, address newFeeRecipient)`
   - **Replay/Nonce Logic:**
-    - `usedIntents` mapping (bytes32 digest → bool) for replay protection
-    - `nonce` in RouteIntent struct (off-chain unique)
+  - `usedIntents` mapping (bytes32 digest → bool) for signed-intent replay protection
+  - `usedMessages` mapping (bytes32 messageHash → bool) for canonical message-level replay protection on destination chains
+  - `nonce` in RouteIntent struct (off-chain unique)
+  - On-chain helpers: `computeMessageHash(...)` and `computeGlobalRouteId(...)` — backend should compute these deterministically and use `globalRouteId` as idempotency key
   - **Roles:**
     - `admin`, `feeRecipient` (settable via admin-only functions)
 
@@ -38,7 +43,7 @@
 - **Domain IDs:**
   - Per-chain, e.g. Ethereum: 0, Avalanche: 1, Base: 3 (see Circle docs)
 - **Retry/Idempotency:**
-  - Use message_hash or global_route_id as idempotency key
+  - Use `global_route_id` (GRI) or `message_hash` as idempotency key. Prefer `global_route_id` emitted in `UniversalBridgeInitiated` for cross-chain uniqueness.
   - Backend should retry with exponential backoff, handle Circle rate limits
 
 ## 3. Backend Services
@@ -50,8 +55,19 @@
 
 - **Execution Relayer**
   - Watches EVM events (`BridgeInitiated`, `IntentConsumed`)
+  - Prefer listening to `UniversalBridgeInitiated` for canonical, pre-computed `messageHash` and `globalRouteId` values; use those keys for idempotency across workers
   - Builds and submits txs (universalBridgeTransfer, mint/redeem)
   - Manages gas, nonces, replay protection
+
+- **Finalizer Worker (destination)**
+  - Responsible for performing the destination-side finalize flow. Two common modes:
+    - Adapter-driven: call into partner adapter which then calls `finalizeMessage` on `Router`.
+    - Relayer-driven: backend/relayer calls the adapter (or calls `finalizeMessage` if adapter is not set to restrict).
+  - Responsibilities:
+    - Observe incoming token transfers to destination adapter/vault (or rely on `UniversalBridgeInitiated` logs and off-chain routing to confirm received funds)
+    - Compute and verify `messageHash`/`globalRouteId` using on-chain helpers so values match the chain's `UniversalBridgeInitiated`/message preimage
+    - Call adapter/finalizer to execute `finalizeMessage(...)` and mark the message as used on-chain
+    - Record `FeeApplied` events and update accounting for protocol, LP, and relayer shares
 
 - **Reconciliation & Accounting**
   - Records cross-chain transfer state machine:
@@ -86,6 +102,7 @@ CREATE TABLE messages (
   recipient TEXT,
   nonce BIGINT,
   global_route_id TEXT,
+  used BOOLEAN DEFAULT false,
   created_at TIMESTAMP DEFAULT now()
 );
 CREATE TABLE attestations (
@@ -115,10 +132,27 @@ CREATE TABLE fees (
   fee_id SERIAL PRIMARY KEY,
   global_route_id TEXT,
   protocol_fee NUMERIC,
+  lp_fee NUMERIC,
   relayer_fee NUMERIC,
   asset TEXT,
   collector TEXT,
+  protocol_share_bps INT,
+  lp_share_bps INT,
   applied_at TIMESTAMP
+);
+
+CREATE TABLE canonical_messages (
+  global_route_id TEXT PRIMARY KEY,
+  message_hash TEXT,
+  src_chain_id INT,
+  dst_chain_id INT,
+  user TEXT,
+  token TEXT,
+  forwarded_amount NUMERIC,
+  protocol_fee NUMERIC,
+  relayer_fee NUMERIC,
+  payload_hash TEXT,
+  created_at TIMESTAMP DEFAULT now()
 );
 ```
 
@@ -134,6 +168,7 @@ CREATE TABLE fees (
 
 - **Webhooks:**
   - `POST /webhook/circle` — receive attestation updates (if Circle supports)
+  - `POST /webhook/adapter` — (optional) receive adapter callbacks that the destination transfer arrived and finalizer can be called
 
 ## 6. Config & Secrets
 
@@ -163,8 +198,10 @@ sequenceDiagram
   Backend->>CircleAPI: Poll for attestation
   CircleAPI-->>Backend: Attestation
   Backend->>DestCCTPAdapter: redeem/mint with attestation
-  DestCCTPAdapter->>DestRouter: Finalize transfer
-  DestRouter->>Backend: Emit IntentConsumed
+  DestCCTPAdapter->>DestRouter: Finalize transfer (adapter moves funds to vault/adapter)
+  DestRouter->>Backend: Emit UniversalBridgeInitiated / BridgeInitiated
+  Backend->>Adapter/Relayer: trigger `finalizeMessage` on adapter (or adapter calls `finalizeMessage` itself)
+  Router->>Backend: Emit FeeApplied (after finalize)
 ```
 
 ## 8. Acceptance Checklist for EVM Backend
@@ -175,8 +212,10 @@ sequenceDiagram
 - [ ] REST APIs and webhooks exposed for transfer creation/status
 - [ ] Configs and secrets loaded (Circle API, RPCs, keys)
 - [ ] Replay protection and idempotency enforced (message_hash/global_route_id)
+ - [ ] Message-level replay protection enforced: backend should check `usedMessages` on-chain and avoid duplicate finalization
 - [ ] Reorg handling (confirmations before finalization)
 - [ ] Fee applications indexed and queryable
+ - [ ] Fee applications indexed and queryable (listen to `FeeApplied` and store protocol/LP/relayer splits)
 - [ ] All references to file paths, event/function names in this repo are documented for listener/builder wiring
 
 ---
