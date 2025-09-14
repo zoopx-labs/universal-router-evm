@@ -1,0 +1,230 @@
+{
+  "RPC_SEPOLIA": {
+    "rpc": "https://ethereum-sepolia-rpc.publicnode.com",
+    "chainId": 11155111,
+    "address": "0x663e869b03823bdbf00d737d113e29bd8b4f8bea",
+    "tx": "0x88f4e61d695d551b5c97eb26a0a61d5fb409bc6737349d9d51da0cb454728e15",
+    "getters": {
+      "admin": "0xC956f740AfFa2c42c9ce59F55000e5659502EEdB",
+      "feeRecipient": "0xC956f740AfFa2c42c9ce59F55000e5659502EEdB",
+      "defaultTarget": "0x0000000000000000000000000000000000000000",
+      "SRC_CHAIN_ID": 13991
+    }
+  },
+  "RPC_OP_SEPOLIA": {
+    "rpc": "https://optimism-testnet.gateway.tatum.io/v3/rpc?apiKey=t-68317cbc34512de7260e4812-d66f8579d516463696965ba5",
+    "chainId": 11155420,
+    "address": "0x7b568ae4cbe30d70d4ba299f0fb0615666690c2f",
+    "tx": "0xcc7dc5d728cb7a686775524c512fde49858bcbb1f06ee96ff8d53e658b43aba4",
+    "getters": {
+      "admin": "0xC956f740AfFa2c42c9ce59F55000e5659502EEdB",
+      "feeRecipient": "0xC956f740AfFa2c42c9ce59F55000e5659502EEdB",
+      "defaultTarget": "0x0000000000000000000000000000000000000000",
+      "SRC_CHAIN_ID": 14300
+    }
+  },
+  "RPC_BASE_SEPOLIA": {
+    "rpc": "https://base-sepolia.gateway.tatum.io/v3/rpc?apiKey=t-68317cbc34512de7260e4812-d66f8579d516463696965ba5",
+    "chainId": 84532,
+    "address": "0xb44c8b340eaa0914d8dd2f1a74e198a6a1b5b5e8",
+    "tx": "0x69bead98e9cd6dc96e8db578ec86d1e0ef87e0b68d5fa7f21d01af6f6286c35e",
+    "getters": {
+      "admin": "0xC956f740AfFa2c42c9ce59F55000e5659502EEdB",
+      "feeRecipient": "0xC956f740AfFa2c42c9ce59F55000e5659502EEdB",
+      "defaultTarget": "0x0000000000000000000000000000000000000000",
+      "SRC_CHAIN_ID": 18996
+    }
+  },
+  "RPC_BSC_TESTNET": {
+    "rpc": "https://data-seed-prebsc-1-s1.bnbchain.org:8545",
+    "chainId": 97,
+    "address": "0xb44c8b340eaa0914d8dd2f1a74e198a6a1b5b5e8",
+    "tx": "0x5ae8f77a13c81c871475a874a9bc8a0256544b67383b0f821f62c142a67d8c3a",
+    "getters": {
+      "admin": "0xC956f740AfFa2c42c9ce59F55000e5659502EEdB",
+      "feeRecipient": "0xC956f740AfFa2c42c9ce59F55000e5659502EEdB",
+      "defaultTarget": "0x0000000000000000000000000000000000000000",
+      "SRC_CHAIN_ID": 97
+    }
+  },
+  "RPC_AVAX_FUJI": {
+    "rpc": "https://api.avax-test.network/ext/bc/C/rpc",
+    "chainId": 43113,
+    "address": "0x01cd78f96ce006017a7d14e942bdc06400f7aa00",
+    "tx": "0xeede5b48358b82787cb75a61e12528d7c4846750a598fe2bfdbb9d5768b99c5f",
+    "getters": {
+      "admin": "0xC956f740AfFa2c42c9ce59F55000e5659502EEdB",
+      "feeRecipient": "0xC956f740AfFa2c42c9ce59F55000e5659502EEdB",
+      "defaultTarget": "0x0000000000000000000000000000000000000000",
+      "SRC_CHAIN_ID": 43113
+    }
+  },
+  "RPC_POLYGON_AMOY": {
+    "rpc": "https://rpc-amoy.polygon.technology/",
+    "chainId": 80002,
+    "address": "0x01cd78f96ce006017a7d14e942bdc06400f7aa00",
+    "tx": "0xfce93a72a60d8157afdd0b0cbd7564bfd14270e62610d84bcb22203c6c183e7b",
+    "getters": {
+      "admin": "0xC956f740AfFa2c42c9ce59F55000e5659502EEdB",
+      "feeRecipient": "0xC956f740AfFa2c42c9ce59F55000e5659502EEdB",
+      "defaultTarget": "0x0000000000000000000000000000000000000000",
+      "SRC_CHAIN_ID": 14466
+    }
+  },
+  "RPC_CRONOS_TESTNET": {
+    "rpc": "https://evm-t3.cronos.org",
+    "chainId": 338,
+    "address": "0x01cd78f96ce006017a7d14e942bdc06400f7aa00",
+    "tx": "0xb80080333fc1543e53896b76a21da9dea612c9398667eb7198df52be2eaab595",
+    "getters": {
+      "admin": "0xC956f740AfFa2c42c9ce59F55000e5659502EEdB",
+      "feeRecipient": "0xC956f740AfFa2c42c9ce59F55000e5659502EEdB",
+      "defaultTarget": "0x0000000000000000000000000000000000000000",
+      "SRC_CHAIN_ID": 338
+    }
+  },
+  "RPC_CELO_ALFAJORES": {
+    "rpc": "https://alfajores-forno.celo-testnet.org",
+    "chainId": 44787,
+    "address": "0xb44c8b340eaa0914d8dd2f1a74e198a6a1b5b5e8",
+    "tx": "0x69cf4512042f904e17b32cd496b59994442bb44346987e021a7d2432e32ec2b4",
+    "getters": {
+      "admin": "0xC956f740AfFa2c42c9ce59F55000e5659502EEdB",
+      "feeRecipient": "0xC956f740AfFa2c42c9ce59F55000e5659502EEdB",
+      "defaultTarget": "0x0000000000000000000000000000000000000000",
+      "SRC_CHAIN_ID": 44787
+    }
+  },
+  "RPC_WORLD_TESTNET": {
+    "rpc": "https://worldchain-sepolia.g.alchemy.com/public",
+    "chainId": 4801,
+    "address": "0xb44c8b340eaa0914d8dd2f1a74e198a6a1b5b5e8",
+    "tx": "0xed133897e059ae1f8d45df983f2e52038561aaf8ab2f87d68dc6d8e637ac4c8a",
+    "getters": {
+      "admin": "0xC956f740AfFa2c42c9ce59F55000e5659502EEdB",
+      "feeRecipient": "0xC956f740AfFa2c42c9ce59F55000e5659502EEdB",
+      "defaultTarget": "0x0000000000000000000000000000000000000000",
+      "SRC_CHAIN_ID": 4801
+    }
+  },
+  "RPC_UNICHAIN_TESTNET": {
+    "rpc": "https://sepolia.unichain.org",
+    "chainId": 1301,
+    "address": "0xb44c8b340eaa0914d8dd2f1a74e198a6a1b5b5e8",
+    "tx": "0xb199738dbbc57bad805584fbdfcdd3c47bad3e84d1e1c26c56551d9ef5ec774e",
+    "getters": {
+      "admin": "0xC956f740AfFa2c42c9ce59F55000e5659502EEdB",
+      "feeRecipient": "0xC956f740AfFa2c42c9ce59F55000e5659502EEdB",
+      "defaultTarget": "0x0000000000000000000000000000000000000000",
+      "SRC_CHAIN_ID": 1301
+    }
+  },
+  "RPC_SEI_EVM_TESTNET": {
+    "rpc": "https://evm-rpc-testnet.sei-apis.com",
+    "chainId": 1328,
+    "address": "0x01cd78f96ce006017a7d14e942bdc06400f7aa00",
+    "tx": "0xe4e8daefc0d6b8c75d0c443ca2874dcb243c11e3faf1e97fd880bbbeca6af5ad",
+    "getters": {
+      "admin": "0xC956f740AfFa2c42c9ce59F55000e5659502EEdB",
+      "feeRecipient": "0xC956f740AfFa2c42c9ce59F55000e5659502EEdB",
+      "defaultTarget": "0x0000000000000000000000000000000000000000",
+      "SRC_CHAIN_ID": 1328
+    }
+  },
+  "RPC_SONIC_EVM_TESTNET": {
+    "rpc": "https://rpc.blaze.soniclabs.com",
+    "chainId": 57054,
+    "address": "0x01cd78f96ce006017a7d14e942bdc06400f7aa00",
+    "tx": "0x44673a36f804c703926ae3160d6e22c4c02395be211b519da5f3e98fd7fccd70",
+    "getters": {
+      "admin": "0xC956f740AfFa2c42c9ce59F55000e5659502EEdB",
+      "feeRecipient": "0xC956f740AfFa2c42c9ce59F55000e5659502EEdB",
+      "defaultTarget": "0x0000000000000000000000000000000000000000",
+      "SRC_CHAIN_ID": 57054
+    }
+  },
+  "RPC_QUBETICS_TESTNET": {
+    "rpc": "https://rpc-testnet.qubetics.work",
+    "chainId": 9029,
+    "address": "0x01cd78f96ce006017a7d14e942bdc06400f7aa00",
+    "tx": "0x225576ff0665471cf72f9c39e7f12cd79fadde249d01218938fbd206384cb200",
+    "getters": {
+      "admin": "0xC956f740AfFa2c42c9ce59F55000e5659502EEdB",
+      "feeRecipient": "0xC956f740AfFa2c42c9ce59F55000e5659502EEdB",
+      "defaultTarget": "0x0000000000000000000000000000000000000000",
+      "SRC_CHAIN_ID": 9029
+    }
+  },
+  "RPC_XDC_TESTNET": {
+    "rpc": "https://erpc.apothem.network",
+    "chainId": 51,
+    "address": "0x01cd78f96ce006017a7d14e942bdc06400f7aa00",
+    "tx": "0xf512e1c566764bfd69b29ccd2a2f035707e3e0ecddafb68d5baef4fe0bdcd88e",
+    "getters": {
+      "admin": "0xC956f740AfFa2c42c9ce59F55000e5659502EEdB",
+      "feeRecipient": "0xC956f740AfFa2c42c9ce59F55000e5659502EEdB",
+      "defaultTarget": "0x0000000000000000000000000000000000000000",
+      "SRC_CHAIN_ID": 51
+    }
+  },
+  "RPC_BERACHAIN_BEPOLIA": {
+    "rpc": "https://bepolia.rpc.berachain.com",
+    "chainId": 80069,
+    "address": "0xb44c8b340eaa0914d8dd2f1a74e198a6a1b5b5e8",
+    "tx": "0x7cb82c37be79b4336b60a88c55067432311d71b339983d855cb80c66136b1599",
+    "getters": {
+      "admin": "0xC956f740AfFa2c42c9ce59F55000e5659502EEdB",
+      "feeRecipient": "0xC956f740AfFa2c42c9ce59F55000e5659502EEdB",
+      "defaultTarget": "0x0000000000000000000000000000000000000000",
+      "SRC_CHAIN_ID": 14533
+    }
+  },
+  "RPC_PLUME_TESTNET": {
+    "rpc": "https://testnet-rpc.plume.org",
+    "chainId": 98867,
+    "address": "0x18d9c48c2cec535e713f63c01ebfc810b7ce6d5e",
+    "tx": "0x544c6de2615144aa7baeb3198df78ae3e12289d049f134143c35c95be3aa8a53",
+    "getters": {
+      "admin": "0xC956f740AfFa2c42c9ce59F55000e5659502EEdB",
+      "feeRecipient": "0xC956f740AfFa2c42c9ce59F55000e5659502EEdB",
+      "defaultTarget": "0x0000000000000000000000000000000000000000",
+      "SRC_CHAIN_ID": 33331
+    }
+  },
+  "RPC_LINEA_SEPOLIA": {
+    "rpc": "https://rpc.sepolia.linea.build",
+    "chainId": 59141,
+    "address": "0x000608fb1617b05022c481bc1fd4030c82933c16",
+    "tx": "0x1430ffc57703a1a3863cb62bf326b936a1ce62939e43952c69ff3ccb190e93ea",
+    "getters": {
+      "admin": "0xC956f740AfFa2c42c9ce59F55000e5659502EEdB",
+      "feeRecipient": "0xC956f740AfFa2c42c9ce59F55000e5659502EEdB",
+      "defaultTarget": "0x0000000000000000000000000000000000000000",
+      "SRC_CHAIN_ID": 59141
+    }
+  },
+  "RPC_ARB_SEPOLIA": {
+    "rpc": "https://arb-testnet.gateway.tatum.io/v3/rpc?apiKey=t-68317cbc34512de7260e4812-d66f8579d516463696965ba5",
+    "chainId": 421614,
+    "address": "0x9f2946af4bd855bbfbe112d2504615fb7d62da65",
+    "tx": "0x039e1db9ab12b7b2dd65328b89282062fb33d5910abb70198a2c32a06b73aebc",
+    "getters": {
+      "admin": "0xC956f740AfFa2c42c9ce59F55000e5659502EEdB",
+      "feeRecipient": "0xC956f740AfFa2c42c9ce59F55000e5659502EEdB",
+      "defaultTarget": "0x0000000000000000000000000000000000000000",
+      "SRC_CHAIN_ID": 28398
+    }
+  },
+  "RPC_BOB_TESTNET": {
+    "rpc": "https://bob-sepolia.rpc.gobob.xyz",
+    "chainId": 808813,
+    "address": "0x9f2946af4bd855bbfbe112d2504615fb7d62da65",
+    "tx": "0x10af18550dd8ba83f734bc9998d12cb6a201eccbd10629617f39bda50de80a38",
+    "getters": {
+      "admin": "0xC956f740AfFa2c42c9ce59F55000e5659502EEdB",
+      "feeRecipient": "0xC956f740AfFa2c42c9ce59F55000e5659502EEdB",
+      "defaultTarget": "0x0000000000000000000000000000000000000000",
+      "SRC_CHAIN_ID": 22381
+    }
+  }
+}

@@ -4,15 +4,43 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "clean": "rimraf artifacts cache typechain-types",
+    "clean": "rimraf artifacts cache dist typechain-types",
     "build": "hardhat compile",
-    "lint": "eslint . --ext .ts",
-    "format": "prettier --write \"**/*.{ts,tsx,sol,md,json}\"",
-    "test": "hardhat test",
-    "coverage": "hardhat coverage",
-    "size": "hardhat size-contracts",
-    "gas": "HARDHAT_MAX_MEMORY=4096 hardhat test --network hardhat",
-    "deploy:sepolia": "hardhat run script/deploy.ts --network sepolia",
-    "deploy:local": "hardhat run script/deploy.ts --network hardhat"
+    "smoke": "hardhat run script/smoke.ts --network hardhat",
+    "test": "hardhat test test-js/Router.spec.ts",
+    "dry:all": "ts-node scripts/create2/dry-run.ts",
+    "deploy:factory": "ts-node scripts/create2/deploy-factory.ts",
+    "deploy:create2": "ts-node scripts/create2/deploy-create2.ts",
+    "balances": "ts-node scripts/create2/check-balances.ts",
+    "faucets": "ts-node scripts/create2/faucet-hints.ts",
+    "fund": "ts-node scripts/create2/fund-from-key.ts",
+    "gas:estimate": "ts-node scripts/create2/estimate-gas.ts",
+    "vanity:salt": "ts-node scripts/create2/vanity-salt.ts"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.4.0"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-ethers": "^3.0.0",
+    "@nomicfoundation/hardhat-mocha": "^3.0.2",
+    "@nomicfoundation/hardhat-viem": "^3.0.0",
+    "@types/chai": "^4.3.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^24.3.1",
+    "@typescript-eslint/eslint-plugin": "^8.43.0",
+    "@typescript-eslint/parser": "^8.43.0",
+    "chai": "^4.3.7",
+    "dotenv": "^17.2.2",
+    "eslint": "^9.35.0",
+    "ethers": "^6.9.0",
+    "hardhat": "^3.0.4",
+    "mocha": "^11.7.2",
+    "node-fetch": "^3.3.2",
+    "prettier": "^3.6.2",
+    "rimraf": "^6.0.1",
+    "solc": "^0.8.30",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.2",
+    "viem": "^2.37.4"
   }
 }

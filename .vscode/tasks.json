@@ -1,0 +1,25 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "verify-getters",
+			"type": "shell",
+			"command": "node --version && pnpm -v && node -e \"process.exit(0)\" && npx -y ts-node --esm scripts/verify-getters.ts",
+			"isBackground": false,
+			"problemMatcher": [
+				"$tsc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "verify-getters",
+			"type": "shell",
+			"command": "node --version && pnpm -v && npx -y ts-node --esm scripts/verify-getters.ts",
+			"isBackground": false,
+			"problemMatcher": [
+				"$tsc"
+			],
+			"group": "build"
+		}
+	]
+}
