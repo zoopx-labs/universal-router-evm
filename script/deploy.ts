@@ -19,10 +19,13 @@ async function main() {
 
   // Optional post-deploy configuration from env
   // Support either a single ADAPTER_ADDRESS or a comma-separated list in ADAPTER_ADDRESSES
+  // Support ADAPTER_ADDRESSES (csv), ADAPTER_ADDRESS (single), and RELAYER_ADAPTER_ADDRESS (single relayer EOA/contract)
   const adapterEnv = process.env.ADAPTER_ADDRESSES || process.env.ADAPTER_ADDRESS;
-  const adapters: string[] = adapterEnv
+  const adaptersFromEnv: string[] = adapterEnv
     ? adapterEnv.split(',').map(a => a.trim()).filter(a => a && a !== ethers.constants.AddressZero)
     : [];
+  const relayerAdapter = process.env.RELAYER_ADAPTER_ADDRESS ? [process.env.RELAYER_ADAPTER_ADDRESS.trim()] : [];
+  const adapters: string[] = [...new Set([...adaptersFromEnv, ...relayerAdapter])];
   const feeCollector = process.env.FEE_COLLECTOR || feeRecipient;
   const protocolFeeBps = Number(process.env.PROTOCOL_FEE_BPS || 0);
   const relayerFeeBps = Number(process.env.RELAYER_FEE_BPS || 0);
