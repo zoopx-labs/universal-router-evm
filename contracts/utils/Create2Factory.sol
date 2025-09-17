@@ -2,6 +2,16 @@
 pragma solidity ^0.8.26;
 
 contract Create2Factory {
+    address public owner;
+
+    constructor() {
+        owner = msg.sender;
+    }
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "not owner");
+        _;
+    }
     event Deployed(address addr, bytes32 salt);
 
     function deploy(bytes32 salt, bytes calldata creationCode) external payable returns (address addr) {
@@ -21,5 +31,11 @@ contract Create2Factory {
     function compute(bytes32 salt, bytes32 creationCodeHash) external view returns (address) {
         return
             address(uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), address(this), salt, creationCodeHash)))));
+    }
+
+    // Withdraw any ETH accidentally sent (silences Slither 'locks ether').
+    function withdraw(address payable to) external onlyOwner {
+        require(to != address(0), "zero to");
+        to.transfer(address(this).balance);
     }
 }

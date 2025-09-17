@@ -1,13 +1,15 @@
 {
   "compilerOptions": {
     "target": "ES2020",
-    "module": "CommonJS",
+  "module": "Node16",
     "strict": true,
     "declaration": false,
     "outDir": "dist",
     "esModuleInterop": true,
     "resolveJsonModule": true,
-    "types": ["node", "mocha"]
+  "types": ["node", "mocha"],
+  "moduleResolution": "node16"
   },
-  "include": ["./hardhat.config.ts", "script", "test", "typechain-types"]
+  "include": ["./hardhat.config.ts", "script", "typechain-types"],
+  "exclude": ["test", "foundry", "foundry-test"]
 }

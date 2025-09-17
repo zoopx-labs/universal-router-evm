@@ -4,9 +4,11 @@ pragma solidity ^0.8.26;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {Hashing} from "./lib/Hashing.sol";
 
 // Optional permit interfaces
 interface IERC20Permit {
@@ -27,7 +29,7 @@ interface IERC20PermitDAI {
     ) external;
 }
 
-contract Router is ReentrancyGuard, EIP712 {
+contract Router is ReentrancyGuard, EIP712, AccessControl {
     using SafeERC20 for IERC20;
 
     /// @notice Security notes:
@@ -65,6 +67,8 @@ contract Router is ReentrancyGuard, EIP712 {
     error InvalidSignature();
     error IntentMismatch();
     error ResidueLeft();
+    error NotAdapter();
+    error AdapterFrozenErr();
 
     // ---------- Events ----------
     event BridgeInitiated( // commitment to the full off-chain plan
@@ -75,7 +79,7 @@ contract Router is ReentrancyGuard, EIP712 {
         address indexed token,
         address target,
         uint256 forwardedAmount,
-        uint256 protocolFee,
+    uint256 /*protocolFee*/,
         uint256 relayerFee,
         bytes32 payloadHash,
         uint16 srcChainId,
@@ -142,6 +146,7 @@ contract Router is ReentrancyGuard, EIP712 {
     // No storage temporaries: router remains stateless and uses locals only
 
     // new constructor: admin, feeRecipient, defaultTarget, srcChainId
+    // NOTE: If _defaultTarget == address(0), every call must explicitly supply a.target (no silent default).
     constructor(address _admin, address _feeRecipient, address _defaultTarget, uint16 _srcChainId)
         EIP712("ZoopXRouter", "1")
     {
@@ -151,6 +156,7 @@ contract Router is ReentrancyGuard, EIP712 {
         feeRecipient = _feeRecipient;
         defaultTarget = _defaultTarget;
         SRC_CHAIN_ID = _srcChainId;
+        _grantRole(DEFAULT_ADMIN_ROLE, _admin);
     }
 
     // ---------- Replay protection for signed intents (small mapping)
@@ -165,8 +171,41 @@ contract Router is ReentrancyGuard, EIP712 {
 
     error MessageAlreadyUsed();
 
-    // ---------- Adapter authority + fee configuration (minimal, additive)
-    address public adapter; // configured destination adapter that is allowed to finalize messages
+    // ---------- Adapter authority (role-based, replaces single-adapter model)
+    // deprecated: single-adapter model replaced by ADAPTER_ROLE
+    address public adapter; // deprecated, retained for storage layout stability
+
+    // Role-based adapter allowlist
+    bytes32 public constant ADAPTER_ROLE = keccak256("ADAPTER_ROLE");
+    mapping(address => bool) public frozenAdapter; // false by default
+
+    // Events for adapter management
+    event AdapterAdded(address adapter);
+    event AdapterRemoved(address adapter);
+    event AdapterFrozen(address adapter, bool frozen);
+
+    // Admin functions for adapter management
+    function addAdapter(address a) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        _grantRole(ADAPTER_ROLE, a);
+        emit AdapterAdded(a);
+    }
+
+    function removeAdapter(address a) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        _revokeRole(ADAPTER_ROLE, a);
+        emit AdapterRemoved(a);
+    }
+
+    function freezeAdapter(address a, bool frozen) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        frozenAdapter[a] = frozen;
+    emit AdapterFrozen(a, frozen);
+    }
+
+    // Adapter role gate
+    modifier onlyAdapter() {
+        if (!hasRole(ADAPTER_ROLE, _msgSender())) revert NotAdapter();
+    if (frozenAdapter[_msgSender()]) revert AdapterFrozenErr();
+        _;
+    }
 
     // Fee configuration (bps) and collector
     uint16 public protocolFeeBps;
@@ -189,6 +228,17 @@ contract Router is ReentrancyGuard, EIP712 {
         uint16 lp_bps,
         address collector,
         uint256 applied_at
+    );
+    // Source-leg fee telemetry (when router skims instead of delegating to target)
+    event FeeAppliedSource(
+        bytes32 indexed messageHash,
+        address indexed asset,
+        address indexed payer,
+        address target,
+        uint256 protocolFee,
+        uint256 relayerFee,
+        address feeRecipient,
+        uint256 appliedAt
     );
 
     event UniversalBridgeInitiated(
@@ -244,9 +294,12 @@ contract Router is ReentrancyGuard, EIP712 {
 
     function acceptAdmin() external {
         if (msg.sender != pendingAdmin) revert Unauthorized();
-        emit AdminUpdated(admin, pendingAdmin);
+        address old = admin;
         admin = pendingAdmin;
         pendingAdmin = address(0);
+        _grantRole(DEFAULT_ADMIN_ROLE, admin);
+        _revokeRole(DEFAULT_ADMIN_ROLE, old);
+        emit AdminUpdated(old, admin);
     }
 
     // ---------- Public: generic, no signature ----------
@@ -260,14 +313,40 @@ contract Router is ReentrancyGuard, EIP712 {
         if (!isContract && a.payload.length != 0) revert PayloadDisallowedToEOA();
         if (enforceTargetAllowlist && isContract && !isAllowedTarget[target]) revert TargetNotContract();
 
-        // perform pull, fee skim and forward to target
+        // perform pull, optional fee skim and forward to target
         uint256 balBefore = IERC20(a.token).balanceOf(address(this));
-        uint256 forwardAmount = _pullSkimAndForward(a.token, msg.sender, target, a.amount, a.protocolFee, a.relayerFee);
+        uint256 forwardAmount = _pullSkimAndForward(
+            a.token, msg.sender, target, a.amount, a.protocolFee, a.relayerFee
+        );
 
-        // compute canonical hashes
-        bytes32 payloadHash = keccak256(a.payload);
-        bytes32 messageHash =
-            computeMessageHash(SRC_CHAIN_ID, a.dstChainId, msg.sender, target, a.token, a.amount, a.nonce, payloadHash);
+        // compute canonical hashes (canonical ordering: srcChainId, srcAdapter(target), recipient(address(0) here), asset, forwardAmount, payloadHash, nonce, dstChainId)
+        bytes32 payloadHash = Hashing.payloadHash(a.payload);
+        uint64 src = uint64(SRC_CHAIN_ID);
+        uint64 dst = uint64(a.dstChainId);
+        address recipientAddr = address(0); // no explicit recipient in unsigned flow
+        bytes32 messageHash = Hashing.messageHash(
+            src,
+            target,
+            recipientAddr,
+            a.token,
+            forwardAmount,
+            payloadHash,
+            a.nonce,
+            dst
+        );
+        // emit source fee telemetry only if router skimmed (i.e., not delegating)
+        if (!delegateFeeToTarget[target] && (a.protocolFee + a.relayerFee) > 0) {
+            emit FeeAppliedSource(
+                messageHash,
+                a.token,
+                msg.sender,
+                target,
+                a.protocolFee,
+                a.relayerFee,
+                feeRecipient,
+                block.timestamp
+            );
+        }
         bytes32 globalRouteId = computeGlobalRouteId(SRC_CHAIN_ID, a.dstChainId, msg.sender, messageHash, a.nonce);
         emit BridgeInitiated(
             bytes32(0),
@@ -282,7 +361,9 @@ contract Router is ReentrancyGuard, EIP712 {
             a.dstChainId,
             a.nonce
         );
-        emit UniversalBridgeInitiated(
+    // BACKEND NOTE: BridgeID = hex(messageHash) off-chain label tying source+destination tx receipts.
+    // Off-chain indexer stores per-leg tx hash arrays keyed by messageHash. globalRouteId is ancillary grouping.
+    emit UniversalBridgeInitiated(
             bytes32(0),
             payloadHash,
             messageHash,
@@ -311,6 +392,36 @@ contract Router is ReentrancyGuard, EIP712 {
         RouteIntent calldata intent,
         bytes calldata signature
     ) external nonReentrant {
+        // Shared verification & bindings
+        (address target, bool isContract, uint256 balBefore) = _preSignedPullAndChecks(a, intent, signature);
+        uint256 forwardAmount = _pullSkimAndForward(
+            a.token, intent.user, target, a.amount, a.protocolFee, a.relayerFee
+        );
+        // Signed: recipient may be intent.recipient (or address(0) if unset)
+        (bytes32 payloadHash, bytes32 messageHash, bytes32 globalRouteId) = _computeHashesSigned(a, intent, target, forwardAmount);
+        if (!delegateFeeToTarget[target] && (a.protocolFee + a.relayerFee) > 0) {
+            emit FeeAppliedSource(
+                messageHash,
+                a.token,
+                intent.user,
+                target,
+                a.protocolFee,
+                a.relayerFee,
+                feeRecipient,
+                block.timestamp
+            );
+        }
+        _emitSourceEvents(intent.routeId, intent.user, a, target, forwardAmount, payloadHash, messageHash, globalRouteId);
+        if (isContract && a.payload.length > 0) _callTarget(target, a.payload);
+        if (IERC20(a.token).balanceOf(address(this)) != balBefore) revert ResidueLeft();
+    }
+
+    // Internal helper consolidating initial verification & environment setup for signed pull variants
+    function _preSignedPullAndChecks(
+        TransferArgs calldata a,
+        RouteIntent calldata intent,
+        bytes calldata signature
+    ) internal returns (address target, bool isContract, uint256 balBefore) {
         // Verify EIP-712 intent, get digest and claim it for replay-protection before external calls
         bytes32 digest = _verifyIntentReturningDigest(intent, signature);
         if (usedIntents[digest]) revert IntentAlreadyUsed();
@@ -323,13 +434,13 @@ contract Router is ReentrancyGuard, EIP712 {
         if (intent.protocolFee != a.protocolFee) revert IntentMismatch();
         if (intent.relayerFee != a.relayerFee) revert IntentMismatch();
         if (intent.dstChainId != a.dstChainId) revert IntentMismatch();
-        if (intent.payloadHash != keccak256(a.payload)) revert IntentMismatch();
+    if (intent.payloadHash != Hashing.payloadHash(a.payload)) revert IntentMismatch();
 
-        address target = a.target != address(0) ? a.target : defaultTarget;
+    target = a.target != address(0) ? a.target : defaultTarget;
         if (target == address(0)) revert TargetNotSet();
         if (a.payload.length > MAX_PAYLOAD_BYTES) revert PayloadTooLarge();
 
-        bool isContract = target.code.length > 0;
+    isContract = target.code.length > 0;
         if (!isContract && a.payload.length != 0) revert PayloadDisallowedToEOA();
         if (isContract && target.code.length == 0) revert TargetNotContract();
         if (enforceTargetAllowlist && isContract && !isAllowedTarget[target]) revert TargetNotContract();
@@ -337,50 +448,8 @@ contract Router is ReentrancyGuard, EIP712 {
         // Tighten binding: recipient must match target when set
         if (intent.recipient != address(0) && intent.recipient != target) revert IntentMismatch();
 
-        // perform pull, fee skim and forward to target on behalf of the intent.user
-        uint256 balBefore = IERC20(a.token).balanceOf(address(this));
-        // slither-disable-next-line arbitrary-send-erc20
-        uint256 forwardAmount = _pullSkimAndForward(a.token, intent.user, target, a.amount, a.protocolFee, a.relayerFee);
-
-        // compute canonical hashes
-        bytes32 payloadHash = keccak256(a.payload);
-        bytes32 messageHash =
-            computeMessageHash(SRC_CHAIN_ID, a.dstChainId, intent.user, target, a.token, a.amount, a.nonce, payloadHash);
-        bytes32 globalRouteId = computeGlobalRouteId(SRC_CHAIN_ID, a.dstChainId, intent.user, messageHash, a.nonce);
-        emit BridgeInitiated(
-            intent.routeId,
-            intent.user,
-            a.token,
-            target,
-            forwardAmount,
-            a.protocolFee,
-            a.relayerFee,
-            payloadHash,
-            SRC_CHAIN_ID,
-            a.dstChainId,
-            a.nonce
-        );
-        emit UniversalBridgeInitiated(
-            intent.routeId,
-            payloadHash,
-            messageHash,
-            globalRouteId,
-            intent.user,
-            a.token,
-            target,
-            forwardAmount,
-            a.protocolFee,
-            a.relayerFee,
-            SRC_CHAIN_ID,
-            a.dstChainId,
-            a.nonce
-        );
-        if (target.code.length > 0 && a.payload.length > 0) _callTarget(target, a.payload);
-
-        // intent already marked earlier (pre-call) to avoid reentrancy races
-
-        // defense-in-depth: ensure no residue left
-        if (IERC20(a.token).balanceOf(address(this)) != balBefore) revert ResidueLeft();
+        balBefore = IERC20(a.token).balanceOf(address(this));
+        return (target, isContract, balBefore);
     }
 
     // ---------- Optional: Permit variants (partner-agnostic) ----------
@@ -395,16 +464,42 @@ contract Router is ReentrancyGuard, EIP712 {
 
         bool isContract = target.code.length > 0;
         if (!isContract && a.payload.length != 0) revert PayloadDisallowedToEOA();
+        if (enforceTargetAllowlist && isContract && !isAllowedTarget[target]) revert TargetNotContract();
 
         IERC20Permit(a.token).permit(msg.sender, address(this), a.amount, deadline, v, r, s);
 
         uint256 balBefore = IERC20(a.token).balanceOf(address(this));
         // perform pull, fee skim and forward to target
-        uint256 forwardAmount = _pullSkimAndForward(a.token, msg.sender, target, a.amount, a.protocolFee, a.relayerFee);
+        uint256 forwardAmount = _pullSkimAndForward(
+            a.token, msg.sender, target, a.amount, a.protocolFee, a.relayerFee
+        );
 
-        bytes32 payloadHash = keccak256(a.payload);
-        bytes32 messageHash =
-            computeMessageHash(SRC_CHAIN_ID, a.dstChainId, msg.sender, target, a.token, a.amount, a.nonce, payloadHash);
+        bytes32 payloadHash = Hashing.payloadHash(a.payload);
+        uint64 src = uint64(SRC_CHAIN_ID);
+        uint64 dst = uint64(a.dstChainId);
+        address recipientAddr = address(0);
+        bytes32 messageHash = Hashing.messageHash(
+            src,
+            target,
+            recipientAddr,
+            a.token,
+            forwardAmount,
+            payloadHash,
+            a.nonce,
+            dst
+        );
+        if (!delegateFeeToTarget[target] && (a.protocolFee + a.relayerFee) > 0) {
+            emit FeeAppliedSource(
+                messageHash,
+                a.token,
+                msg.sender,
+                target,
+                a.protocolFee,
+                a.relayerFee,
+                feeRecipient,
+                block.timestamp
+            );
+        }
         bytes32 globalRouteId = computeGlobalRouteId(SRC_CHAIN_ID, a.dstChainId, msg.sender, messageHash, a.nonce);
         emit BridgeInitiated(
             bytes32(0),
@@ -419,7 +514,8 @@ contract Router is ReentrancyGuard, EIP712 {
             a.dstChainId,
             a.nonce
         );
-        emit UniversalBridgeInitiated(
+    // NOTE: Backend derives BridgeID from messageHash off-chain (stores leg tx hashes keyed by messageHash)
+    emit UniversalBridgeInitiated(
             bytes32(0),
             payloadHash,
             messageHash,
@@ -453,16 +549,42 @@ contract Router is ReentrancyGuard, EIP712 {
         if (a.payload.length > MAX_PAYLOAD_BYTES) revert PayloadTooLarge();
 
         bool isContract = target.code.length > 0;
-        if (!isContract && a.payload.length != 0) revert PayloadTooLarge();
+        if (!isContract && a.payload.length != 0) revert PayloadDisallowedToEOA();
+        if (enforceTargetAllowlist && isContract && !isAllowedTarget[target]) revert TargetNotContract();
 
         IERC20PermitDAI(a.token).permit(msg.sender, address(this), permitNonce, expiry, allowed, v, r, s);
 
-        // perform pull, fee skim and forward to target
-        uint256 forwardAmount = _pullSkimAndForward(a.token, msg.sender, target, a.amount, a.protocolFee, a.relayerFee);
+        uint256 balBefore = IERC20(a.token).balanceOf(address(this));
+        uint256 forwardAmount = _pullSkimAndForward(
+            a.token, msg.sender, target, a.amount, a.protocolFee, a.relayerFee
+        );
 
-        bytes32 payloadHash = keccak256(a.payload);
-        bytes32 messageHash =
-            computeMessageHash(SRC_CHAIN_ID, a.dstChainId, msg.sender, target, a.token, a.amount, a.nonce, payloadHash);
+        bytes32 payloadHash = Hashing.payloadHash(a.payload);
+        uint64 src = uint64(SRC_CHAIN_ID);
+        uint64 dst = uint64(a.dstChainId);
+        address recipientAddr = address(0);
+        bytes32 messageHash = Hashing.messageHash(
+            src,
+            target,
+            recipientAddr,
+            a.token,
+            forwardAmount,
+            payloadHash,
+            a.nonce,
+            dst
+        );
+        if (!delegateFeeToTarget[target] && (a.protocolFee + a.relayerFee) > 0) {
+            emit FeeAppliedSource(
+                messageHash,
+                a.token,
+                msg.sender,
+                target,
+                a.protocolFee,
+                a.relayerFee,
+                feeRecipient,
+                block.timestamp
+            );
+        }
         bytes32 globalRouteId = computeGlobalRouteId(SRC_CHAIN_ID, a.dstChainId, msg.sender, messageHash, a.nonce);
         emit BridgeInitiated(
             bytes32(0),
@@ -477,7 +599,8 @@ contract Router is ReentrancyGuard, EIP712 {
             a.dstChainId,
             a.nonce
         );
-        emit UniversalBridgeInitiated(
+    // NOTE: Backend derives BridgeID from messageHash off-chain (stores leg tx hashes keyed by messageHash)
+    emit UniversalBridgeInitiated(
             bytes32(0),
             payloadHash,
             messageHash,
@@ -493,6 +616,7 @@ contract Router is ReentrancyGuard, EIP712 {
             a.nonce
         );
         if (isContract && a.payload.length > 0) _callTarget(target, a.payload);
+        if (IERC20(a.token).balanceOf(address(this)) != balBefore) revert ResidueLeft();
     }
 
     // ---------- Approve-then-call (pull semantics for vaults/pools) ----------
@@ -505,6 +629,7 @@ contract Router is ReentrancyGuard, EIP712 {
         bool isContract = target.code.length > 0;
         if (!isContract && a.payload.length != 0) revert PayloadDisallowedToEOA();
         if (isContract && target.code.length == 0) revert TargetNotContract();
+        if (enforceTargetAllowlist && isContract && !isAllowedTarget[target]) revert TargetNotContract();
 
         IERC20 t = IERC20(a.token);
 
@@ -513,9 +638,19 @@ contract Router is ReentrancyGuard, EIP712 {
         uint256 received = t.balanceOf(address(this)) - balBefore;
         if (received != a.amount) revert FeeOnTransferNotSupported();
 
-        uint256 fees = a.protocolFee + a.relayerFee;
-        if (fees > 0) t.safeTransfer(feeRecipient, fees);
-        uint256 forwardAmount = a.amount - fees;
+        uint256 forwardAmount;
+        if (delegateFeeToTarget[target]) {
+            // delegate: no skim, full amount available for target pull
+            forwardAmount = a.amount;
+        } else {
+            uint256 fees = a.protocolFee + a.relayerFee;
+            if (relayerFeeBps > 0) {
+                uint256 relayerCap = Math.mulDiv(a.amount, relayerFeeBps, 10_000);
+                if (a.relayerFee > relayerCap) revert FeeTooHigh();
+            }
+            if (fees > 0) t.safeTransfer(feeRecipient, fees);
+            forwardAmount = a.amount - fees;
+        }
 
         // Ephemeral approval to target - use OZ forceApprove
         IERC20(a.token).forceApprove(target, 0);
@@ -528,9 +663,32 @@ contract Router is ReentrancyGuard, EIP712 {
         IERC20(a.token).forceApprove(target, 0);
 
         // compute and emit
-        bytes32 payloadHash = keccak256(a.payload);
-        bytes32 messageHash =
-            computeMessageHash(SRC_CHAIN_ID, a.dstChainId, msg.sender, target, a.token, a.amount, a.nonce, payloadHash);
+        bytes32 payloadHash = Hashing.payloadHash(a.payload);
+        uint64 src = uint64(SRC_CHAIN_ID);
+        uint64 dst = uint64(a.dstChainId);
+        address recipientAddr = address(0);
+        bytes32 messageHash = Hashing.messageHash(
+            src,
+            target,
+            recipientAddr,
+            a.token,
+            forwardAmount,
+            payloadHash,
+            a.nonce,
+            dst
+        );
+        if (!delegateFeeToTarget[target] && (a.protocolFee + a.relayerFee) > 0) {
+            emit FeeAppliedSource(
+                messageHash,
+                a.token,
+                msg.sender,
+                target,
+                a.protocolFee,
+                a.relayerFee,
+                feeRecipient,
+                block.timestamp
+            );
+        }
         bytes32 globalRouteId = computeGlobalRouteId(SRC_CHAIN_ID, a.dstChainId, msg.sender, messageHash, a.nonce);
         emit BridgeInitiated(
             bytes32(0),
@@ -545,7 +703,8 @@ contract Router is ReentrancyGuard, EIP712 {
             a.dstChainId,
             a.nonce
         );
-        emit UniversalBridgeInitiated(
+    // NOTE: Backend derives BridgeID from messageHash off-chain (stores leg tx hashes keyed by messageHash)
+    emit UniversalBridgeInitiated(
             bytes32(0),
             payloadHash,
             messageHash,
@@ -570,96 +729,130 @@ contract Router is ReentrancyGuard, EIP712 {
         RouteIntent calldata intent,
         bytes calldata signature
     ) external nonReentrant {
-        // Verify EIP-712 intent, get digest and claim it for replay-protection before external calls
-        bytes32 digest = _verifyIntentReturningDigest(intent, signature);
-        if (usedIntents[digest]) revert IntentAlreadyUsed();
-        usedIntents[digest] = true;
-        emit IntentConsumed(digest, intent.routeId, intent.user);
-
-        // Bind intent fields
-        if (intent.token != a.token) revert IntentMismatch();
-        if (intent.amount != a.amount) revert IntentMismatch();
-        if (intent.protocolFee != a.protocolFee) revert IntentMismatch();
-        if (intent.relayerFee != a.relayerFee) revert IntentMismatch();
-        if (intent.dstChainId != a.dstChainId) revert IntentMismatch();
-        if (intent.payloadHash != keccak256(a.payload)) revert IntentMismatch();
-
-        address target = a.target != address(0) ? a.target : defaultTarget;
-        if (target == address(0)) revert TargetNotSet();
-        if (a.payload.length > MAX_PAYLOAD_BYTES) revert PayloadTooLarge();
-
-        bool isContract = target.code.length > 0;
-        if (!isContract && a.payload.length != 0) revert PayloadTooLarge();
-        if (isContract && target.code.length == 0) revert TargetNotContract();
-
-        if (intent.recipient != address(0) && intent.recipient != target) revert IntentMismatch();
-
+        (address target, bool isContract, uint256 balBefore) = _preSignedApproveThenCallChecks(a, intent, signature);
         IERC20 t = IERC20(a.token);
-
-        uint256 balBefore = t.balanceOf(address(this));
-        // slither-disable-next-line arbitrary-send-erc20
+        // pull
         t.safeTransferFrom(intent.user, address(this), a.amount);
         uint256 received = t.balanceOf(address(this)) - balBefore;
         if (received != a.amount) revert FeeOnTransferNotSupported();
-
-        uint256 fees = a.protocolFee + a.relayerFee;
-        if (fees > 0) t.safeTransfer(feeRecipient, fees);
-        uint256 forwardAmount = a.amount - fees;
-
-        // Approve and call (target should pull) - use OZ forceApprove helper
+        uint256 forwardAmount;
+        if (delegateFeeToTarget[target]) {
+            forwardAmount = a.amount;
+        } else {
+            uint256 fees = a.protocolFee + a.relayerFee;
+            if (relayerFeeBps > 0) {
+                uint256 relayerCap = Math.mulDiv(a.amount, relayerFeeBps, 10_000);
+                if (a.relayerFee > relayerCap) revert FeeTooHigh();
+            }
+            if (fees > 0) t.safeTransfer(feeRecipient, fees);
+            forwardAmount = a.amount - fees;
+        }
         IERC20(a.token).forceApprove(target, 0);
         IERC20(a.token).forceApprove(target, forwardAmount);
-
         if (isContract && a.payload.length > 0) _callTarget(target, a.payload);
-
         IERC20(a.token).forceApprove(target, 0);
-
-        // compute and emit
-        bytes32 payloadHash = keccak256(a.payload);
-        bytes32 messageHash =
-            computeMessageHash(SRC_CHAIN_ID, a.dstChainId, intent.user, target, a.token, a.amount, a.nonce, payloadHash);
-        bytes32 globalRouteId = computeGlobalRouteId(SRC_CHAIN_ID, a.dstChainId, intent.user, messageHash, a.nonce);
-        emit BridgeInitiated(
-            intent.routeId,
-            intent.user,
-            a.token,
-            target,
-            forwardAmount,
-            a.protocolFee,
-            a.relayerFee,
-            payloadHash,
-            SRC_CHAIN_ID,
-            a.dstChainId,
-            a.nonce
-        );
-        emit UniversalBridgeInitiated(
-            intent.routeId,
-            payloadHash,
-            messageHash,
-            globalRouteId,
-            intent.user,
-            a.token,
-            target,
-            forwardAmount,
-            a.protocolFee,
-            a.relayerFee,
-            SRC_CHAIN_ID,
-            a.dstChainId,
-            a.nonce
-        );
-
-        // intent already marked earlier (pre-call) to avoid reentrancy races
-
-        // defense-in-depth: ensure no residue left
+        (bytes32 payloadHash, bytes32 messageHash, bytes32 globalRouteId) = _computeHashesSigned(a, intent, target, forwardAmount);
+        if (!delegateFeeToTarget[target] && (a.protocolFee + a.relayerFee) > 0) {
+            emit FeeAppliedSource(
+                messageHash,
+                a.token,
+                intent.user,
+                target,
+                a.protocolFee,
+                a.relayerFee,
+                feeRecipient,
+                block.timestamp
+            );
+        }
+        _emitSourceEvents(intent.routeId, intent.user, a, target, forwardAmount, payloadHash, messageHash, globalRouteId);
         if (IERC20(a.token).balanceOf(address(this)) != balBefore) revert ResidueLeft();
     }
 
+    function _preSignedApproveThenCallChecks(
+        TransferArgs calldata a,
+        RouteIntent calldata intent,
+        bytes calldata signature
+    ) internal returns (address target, bool isContract, uint256 balBefore) {
+        // reuse binding logic
+        (target, isContract, balBefore) = _preSignedPullAndChecks(a, intent, signature);
+        if (!isContract && a.payload.length != 0) revert PayloadTooLarge();
+        return (target, isContract, balBefore);
+    }
+
+    function _computeHashesSigned(
+        TransferArgs calldata a,
+        RouteIntent calldata intent,
+        address target,
+        uint256 forwardAmount
+    ) internal view returns (bytes32 payloadHash, bytes32 messageHash, bytes32 globalRouteId) {
+        payloadHash = Hashing.payloadHash(a.payload);
+        uint64 src = uint64(SRC_CHAIN_ID);
+        uint64 dst = uint64(a.dstChainId);
+        address recipientAddr = intent.recipient != address(0) ? intent.recipient : address(0);
+        messageHash = Hashing.messageHash(
+            src,
+            target,
+            recipientAddr,
+            a.token,
+            forwardAmount,
+            payloadHash,
+            a.nonce,
+            dst
+        );
+        globalRouteId = computeGlobalRouteId(SRC_CHAIN_ID, a.dstChainId, intent.user, messageHash, a.nonce);
+    }
+
+    function _emitSourceEvents(
+        bytes32 routeId,
+        address user,
+        TransferArgs calldata a,
+        address target,
+        uint256 forwardAmount,
+        bytes32 payloadHash,
+        bytes32 messageHash,
+        bytes32 globalRouteId
+    ) internal {
+        emit BridgeInitiated(
+            routeId,
+            user,
+            a.token,
+            target,
+            forwardAmount,
+            a.protocolFee,
+            a.relayerFee,
+            payloadHash,
+            SRC_CHAIN_ID,
+            a.dstChainId,
+            a.nonce
+        );
+        // BACKEND NOTE: BridgeID = hex(messageHash) canonical; relayer correlates finalizeMessage using same hash schema.
+        emit UniversalBridgeInitiated(
+            routeId,
+            payloadHash,
+            messageHash,
+            globalRouteId,
+            user,
+            a.token,
+            target,
+            forwardAmount,
+            a.protocolFee,
+            a.relayerFee,
+            SRC_CHAIN_ID,
+            a.dstChainId,
+            a.nonce
+        );
+    }
+
     // ---------- Internal helpers ----------
-    function _commonChecks(address token, uint256 amount, uint256 protocolFee, uint256 relayerFee) internal pure {
+    function _commonChecks(address token, uint256 amount, uint256 protocolFee, uint256 relayerFee) internal view {
         if (token == address(0)) revert TokenZeroAddress();
         if (amount == 0) revert ZeroAmount();
         if (protocolFee + relayerFee > amount) revert FeesExceedAmount();
         if (protocolFee > Math.mulDiv(amount, FEE_CAP_BPS, 10_000)) revert FeeTooHigh();
+        if (relayerFeeBps > 0) {
+            uint256 relayerCap = Math.mulDiv(amount, relayerFeeBps, 10_000);
+            if (relayerFee > relayerCap) revert FeeTooHigh();
+        }
     }
 
     // NOTE: deprecated custom _forceApprove removed; using OpenZeppelin's `forceApprove` via SafeERC20
@@ -679,13 +872,26 @@ contract Router is ReentrancyGuard, EIP712 {
         t.safeTransferFrom(user, address(this), amount);
         uint256 received = t.balanceOf(address(this)) - balBefore;
         if (received != amount) revert FeeOnTransferNotSupported();
-
+        // If delegating fee logic to target vault, forward full amount (no skim here)
+        if (delegateFeeToTarget[target]) {
+            forwardAmount = amount; // vault expected to skim downstream
+            t.safeTransfer(target, forwardAmount);
+            return forwardAmount;
+        }
+        // Router-side skim path
+        // Cap relayer fee relative to amount using relayerFeeBps (if set >0)
+        if (relayerFeeBps > 0) {
+            uint256 relayerCap = Math.mulDiv(amount, relayerFeeBps, 10_000);
+            if (relayerFee > relayerCap) revert FeeTooHigh(); // use existing FeeTooHigh error for cap breach
+        }
         uint256 totalFees = protocolFee + relayerFee;
-        if (totalFees > 0) t.safeTransfer(feeRecipient, totalFees);
-
+        if (protocolFee > Math.mulDiv(amount, FEE_CAP_BPS, 10_000)) revert FeeTooHigh();
+        if (totalFees > 0) {
+            if (feeRecipient == address(0)) revert ZeroAddress();
+            t.safeTransfer(feeRecipient, totalFees);
+        }
         forwardAmount = amount - totalFees;
         t.safeTransfer(target, forwardAmount);
-
         return forwardAmount;
     }
 
@@ -725,20 +931,7 @@ contract Router is ReentrancyGuard, EIP712 {
         if (ECDSA.recover(digest, sig) != intent.user) revert InvalidSignature();
     }
 
-    // ---------- Helpers: message hash and global route id (deterministic on-chain)
-    function computeMessageHash(
-        uint16 srcChainId,
-        uint16 dstChainId,
-        address initiator,
-        address target,
-        address token,
-        uint256 amount,
-        uint64 nonce,
-        bytes32 payloadHash
-    ) public pure returns (bytes32) {
-        return keccak256(abi.encodePacked(srcChainId, dstChainId, initiator, target, token, amount, nonce, payloadHash));
-    }
-
+    // ---------- Helpers: global route id (deterministic on-chain)
     function computeGlobalRouteId(
         uint16 srcChainId,
         uint16 dstChainId,
@@ -751,6 +944,7 @@ contract Router is ReentrancyGuard, EIP712 {
 
     // ---------- Admin setters for adapter and fee collector
     function setAdapter(address a) external onlyAdmin {
+        // deprecated: retained for backward compatibility (single-adapter model replaced by ADAPTER_ROLE)
         adapter = a;
     }
 
@@ -792,6 +986,13 @@ contract Router is ReentrancyGuard, EIP712 {
         lpShareBps = bps;
     }
 
+    // Enforce exact 100% split between protocol and LP shares (even if destination no longer skims)
+    function setFeeSplit(uint16 protocolShare, uint16 lpShare) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(uint256(protocolShare) + uint256(lpShare) == 10_000, "Split!=100%");
+        protocolShareBps = protocolShare;
+        lpShareBps = lpShare;
+    }
+
     // ---------- Finalizer (adapter-only) ----------
     /**
      * @notice Finalize a cross-chain message. Only the configured adapter may call this.
@@ -814,42 +1015,16 @@ contract Router is ReentrancyGuard, EIP712 {
         uint256 amount,
         uint256 protocolFee,
         uint256 relayerFee
-    ) external nonReentrant {
-        // if adapter set, only adapter may call
-        if (adapter != address(0) && msg.sender != adapter) revert Unauthorized();
-
+    ) external onlyAdapter nonReentrant {
+        // UNCHANGED: replay check, usedMessages[messageHash] = true;
         if (usedMessages[messageHash]) revert MessageAlreadyUsed();
         usedMessages[messageHash] = true;
-
+        if (vault == address(0)) revert ZeroAddress();
         IERC20 t = IERC20(asset);
-
-        // Compute protocol and LP splits (protocolShareBps and lpShareBps are relative bps)
-        uint256 protocolShare = Math.mulDiv(amount, protocolShareBps, 10_000);
-        uint256 lpShare = Math.mulDiv(amount, lpShareBps, 10_000);
-
-        // Ensure the collector address exists for protocol share
-        if (protocolShare > 0) {
-            if (feeCollector == address(0)) revert ZeroAddress();
-            t.safeTransfer(feeCollector, protocolShare);
-        }
-
-        if (lpShare > 0 && lpRecipient != address(0)) {
-            t.safeTransfer(lpRecipient, lpShare);
-        }
-
-        // Transfer relayer fee to caller
-        if (relayerFee > 0) {
-            t.safeTransfer(msg.sender, relayerFee);
-        }
-
-        // Remaining amount to vault
-        uint256 paidFees = protocolShare + lpShare + relayerFee;
-        if (paidFees > amount) revert FeesExceedAmount();
-        uint256 toVault = amount - paidFees;
-        if (toVault > 0) {
-            t.safeTransfer(vault, toVault);
-        }
-
+        // Destination now just forwards entire amount (fees already handled source-side or delegated to vault)
+        t.safeTransfer(vault, amount);
+        // Emit telemetry with zeroed fee fields to indicate source/vault handling
+        // NOTE: Backend correlates destination leg via messageHash (human BridgeID derived off-chain)
         emit FeeApplied(
             globalRouteId,
             messageHash,
@@ -857,13 +1032,25 @@ contract Router is ReentrancyGuard, EIP712 {
             address(this),
             vault,
             asset,
-            protocolShare,
-            relayerFee,
+            0,
+            0,
             protocolShareBps,
             lpShareBps,
             feeCollector,
             block.timestamp
         );
+    }
+    // --- Storage append: role-based adapter allowlist and freeze map ---
+    // (appended for layout stability)
+    // See above for ADAPTER_ROLE, frozenAdapter, events
+
+    // --- Storage append: fee delegation per target (vault decides fee skim) ---
+    mapping(address => bool) public delegateFeeToTarget; // true => forward full amount; target/vault skims
+    event DelegateFeeSet(address indexed target, bool delegate);
+    function setDelegateFeeToTarget(address target, bool delegate) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(target != address(0), "zero target");
+        delegateFeeToTarget[target] = delegate;
+        emit DelegateFeeSet(target, delegate);
     }
 
     // (debug helpers removed)

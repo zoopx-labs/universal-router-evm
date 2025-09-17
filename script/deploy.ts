@@ -12,22 +12,37 @@ async function main() {
   const SRC_CHAIN_ID = Number(process.env.SRC_CHAIN_ID || 1);
 
   const Router = await ethers.getContractFactory('Router', deployer);
+  // constructor(address _admin, address _feeRecipient, address _defaultTarget, uint16 _srcChainId)
   const router = await Router.deploy(deployerAddress, feeRecipient, defaultTarget, SRC_CHAIN_ID);
   await router.deployed();
   console.log('Router deployed at:', router.address);
 
   // Optional post-deploy configuration from env
-  const adapter = process.env.ADAPTER_ADDRESS || ethers.constants.AddressZero;
+  // Support either a single ADAPTER_ADDRESS or a comma-separated list in ADAPTER_ADDRESSES
+  const adapterEnv = process.env.ADAPTER_ADDRESSES || process.env.ADAPTER_ADDRESS;
+  const adapters: string[] = adapterEnv
+    ? adapterEnv.split(',').map(a => a.trim()).filter(a => a && a !== ethers.constants.AddressZero)
+    : [];
   const feeCollector = process.env.FEE_COLLECTOR || feeRecipient;
   const protocolFeeBps = Number(process.env.PROTOCOL_FEE_BPS || 0);
   const relayerFeeBps = Number(process.env.RELAYER_FEE_BPS || 0);
   const protocolShareBps = Number(process.env.PROTOCOL_SHARE_BPS || 0);
   const lpShareBps = Number(process.env.LP_SHARE_BPS || 0);
-
-  if (adapter !== ethers.constants.AddressZero) {
-    const tx = await router.setAdapter(adapter);
-    await tx.wait();
-    console.log('Adapter set to', adapter);
+  // Grant ADAPTER_ROLE for each provided adapter address
+  if (adapters.length > 0) {
+    for (const a of adapters) {
+      const tx = await router.addAdapter(a);
+      await tx.wait();
+      console.log('Adapter role granted to', a);
+    }
+    // For backward compatibility populate deprecated single adapter storage with the first adapter (if any)
+    try {
+      const legacyTx = await router.setAdapter(adapters[0]);
+      await legacyTx.wait();
+      console.log('Legacy adapter slot set to', adapters[0]);
+    } catch (e) {
+      console.log('Legacy setAdapter call failed (expected if function removed in future):', (e as any).message || e);
+    }
   }
 
   if (feeCollector && feeCollector !== ethers.constants.AddressZero) {

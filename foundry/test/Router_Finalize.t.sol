@@ -3,6 +3,7 @@ pragma solidity ^0.8.26;
 
 import "forge-std/Test.sol";
 import {Router} from "../../contracts/Router.sol";
+import {Hashing} from "../../contracts/lib/Hashing.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {TargetAdapterMock} from "./mocks/TargetAdapterMock.sol";
 
@@ -21,8 +22,8 @@ contract RouterFinalizeTest is Test {
         // Router constructor: (admin, feeRecipient, defaultTarget, srcChainId)
         router = new Router(address(this), FEE, address(adapter), 1);
 
-        // set adapter for finalize authority
-        router.setAdapter(address(adapter));
+    // grant adapter role for finalize authority
+    router.addAdapter(address(adapter));
 
         // configure fee collector
         router.setFeeCollector(FEE);
@@ -37,7 +38,7 @@ contract RouterFinalizeTest is Test {
         // simulate forwarded amount available in router
         token.mint(address(router), 1e18);
 
-        bytes32 messageHash = router.computeMessageHash(1, 2, user, address(adapter), address(token), 1e18, 1, keccak256(abi.encodePacked("p")));
+    bytes32 messageHash = Hashing.messageHash(1, address(adapter), address(0), address(token), 1e18, keccak256(abi.encodePacked("p")), 1, 2);
         bytes32 gri = router.computeGlobalRouteId(1, 2, user, messageHash, 1);
 
         // call finalize as adapter
@@ -55,25 +56,25 @@ contract RouterFinalizeTest is Test {
 
     function testNonAdapterCannotFinalize() public {
         token.mint(address(router), 1e18);
-        bytes32 messageHash = router.computeMessageHash(1, 2, user, address(adapter), address(token), 1e18, 2, keccak256(abi.encodePacked("p2")));
+    bytes32 messageHash = Hashing.messageHash(1, address(adapter), address(0), address(token), 1e18, keccak256(abi.encodePacked("p2")), 2, 2);
         bytes32 gri = router.computeGlobalRouteId(1, 2, user, messageHash, 2);
 
-        vm.prank(address(0xBAD));
-        vm.expectRevert();
+    vm.prank(address(0xBAD));
+    vm.expectRevert(Router.NotAdapter.selector);
         router.finalizeMessage(gri, messageHash, address(token), address(adapter), address(0x0), 1e18, 0, 0);
     }
 
     function testReplayPrevention() public {
         token.mint(address(router), 1e18);
-        bytes32 messageHash = router.computeMessageHash(1, 2, user, address(adapter), address(token), 1e18, 3, keccak256(abi.encodePacked("p3")));
+    bytes32 messageHash = Hashing.messageHash(1, address(adapter), address(0), address(token), 1e18, keccak256(abi.encodePacked("p3")), 3, 2);
         bytes32 gri = router.computeGlobalRouteId(1, 2, user, messageHash, 3);
 
-        vm.prank(address(adapter));
-        router.finalizeMessage(gri, messageHash, address(token), address(adapter), address(0x0), 1e18, 0, 0);
+    vm.prank(address(adapter));
+    router.finalizeMessage(gri, messageHash, address(token), address(adapter), address(0x0), 1e18, 0, 0);
 
         // second call should revert
-        vm.prank(address(adapter));
-        vm.expectRevert();
+    vm.prank(address(adapter));
+    vm.expectRevert(Router.MessageAlreadyUsed.selector);
         router.finalizeMessage(gri, messageHash, address(token), address(adapter), address(0x0), 1e18, 0, 0);
     }
 }

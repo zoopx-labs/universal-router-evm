@@ -153,3 +153,7 @@ PRs welcome. Please:
 ## License
 
 MIT
+
+## Additional Documentation
+
+- Adapter Roles & Finalization: `docs/adapter-roles.md`

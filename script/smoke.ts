@@ -4,14 +4,18 @@ import fetch from 'node-fetch';
 
 const RPC = 'http://127.0.0.1:8545';
 
-async function rpc(method: string, params: any[] = []) {
+interface JsonRpcSuccess<T=any> { jsonrpc: '2.0'; id: number; result: T; }
+interface JsonRpcError { jsonrpc: '2.0'; id: number; error: { code: number; message: string; data?: any }; }
+type JsonRpcResponse<T=any> = JsonRpcSuccess<T> | JsonRpcError;
+
+async function rpc<T=any>(method: string, params: any[] = []): Promise<T> {
   const res = await fetch(RPC, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
   });
-  const j = await res.json();
-  if (j.error) throw new Error(j.error.message || JSON.stringify(j.error));
+  const j = await res.json() as JsonRpcResponse<T>;
+  if ('error' in j) throw new Error(j.error.message || JSON.stringify(j.error));
   return j.result;
 }
 
@@ -33,12 +37,14 @@ async function main() {
   await rpc('eth_sendTransaction', [{ from: deployer, to: mockAddr, data: mintData }]);
 
   // --- Deploy Router ---
+  const admin = deployer; // using deployer as admin for smoke test
   const feeRecipient = deployer;
   const defaultTarget = deployer;
   const srcChainId = 1;
 
   const routerArtifact = await hre.artifacts.readArtifact('Router');
-  const routerDeployData = encodeDeployData({ abi: routerArtifact.abi as any, bytecode: routerArtifact.bytecode as `0x${string}`, args: [feeRecipient, defaultTarget, srcChainId] });
+  // constructor(address _admin, address _feeRecipient, address _defaultTarget, uint16 _srcChainId)
+  const routerDeployData = encodeDeployData({ abi: routerArtifact.abi as any, bytecode: routerArtifact.bytecode as `0x${string}`, args: [admin, feeRecipient, defaultTarget, srcChainId] });
   const routerTxHash: string = await rpc('eth_sendTransaction', [{ from: deployer, data: routerDeployData }]);
   const routerRcpt = await waitForReceipt(routerTxHash);
   const routerAddr = routerRcpt.contractAddress;
@@ -47,6 +53,17 @@ async function main() {
   // approve
   const approveData = encodeFunctionData({ abi: mockArtifact.abi as any, functionName: 'approve', args: [routerAddr, 500000n] });
   await rpc('eth_sendTransaction', [{ from: deployer, to: mockAddr, data: approveData }]);
+
+  // (optional) grant adapter role to deployer so it could call finalize in extended flows
+  try {
+    const addAdapterData = encodeFunctionData({ abi: routerArtifact.abi as any, functionName: 'addAdapter', args: [deployer] });
+    await rpc('eth_sendTransaction', [{ from: deployer, to: routerAddr, data: addAdapterData }]);
+    // also set legacy adapter variable for backward compatibility
+    const setAdapterData = encodeFunctionData({ abi: routerArtifact.abi as any, functionName: 'setAdapter', args: [deployer] });
+    await rpc('eth_sendTransaction', [{ from: deployer, to: routerAddr, data: setAdapterData }]);
+  } catch (e) {
+    console.log('Adapter role grant (or legacy set) skipped:', (e as any).message || e);
+  }
 
   // call universalBridgeTransfer
   const ubData = encodeFunctionData({
