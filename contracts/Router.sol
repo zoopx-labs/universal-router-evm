@@ -442,7 +442,6 @@ contract Router is ReentrancyGuard, EIP712, AccessControl {
 
     isContract = target.code.length > 0;
         if (!isContract && a.payload.length != 0) revert PayloadDisallowedToEOA();
-        if (isContract && target.code.length == 0) revert TargetNotContract();
         if (enforceTargetAllowlist && isContract && !isAllowedTarget[target]) revert TargetNotContract();
 
         // Tighten binding: recipient must match target when set
@@ -628,7 +627,7 @@ contract Router is ReentrancyGuard, EIP712, AccessControl {
 
         bool isContract = target.code.length > 0;
         if (!isContract && a.payload.length != 0) revert PayloadDisallowedToEOA();
-        if (isContract && target.code.length == 0) revert TargetNotContract();
+        
         if (enforceTargetAllowlist && isContract && !isAllowedTarget[target]) revert TargetNotContract();
 
         IERC20 t = IERC20(a.token);
@@ -648,7 +647,10 @@ contract Router is ReentrancyGuard, EIP712, AccessControl {
                 uint256 relayerCap = Math.mulDiv(a.amount, relayerFeeBps, 10_000);
                 if (a.relayerFee > relayerCap) revert FeeTooHigh();
             }
-            if (fees > 0) t.safeTransfer(feeRecipient, fees);
+            if (fees > 0) {
+                if (feeRecipient == address(0)) revert ZeroAddress();
+                t.safeTransfer(feeRecipient, fees);
+            }
             forwardAmount = a.amount - fees;
         }
 
@@ -744,7 +746,10 @@ contract Router is ReentrancyGuard, EIP712, AccessControl {
                 uint256 relayerCap = Math.mulDiv(a.amount, relayerFeeBps, 10_000);
                 if (a.relayerFee > relayerCap) revert FeeTooHigh();
             }
-            if (fees > 0) t.safeTransfer(feeRecipient, fees);
+            if (fees > 0) {
+                if (feeRecipient == address(0)) revert ZeroAddress();
+                t.safeTransfer(feeRecipient, fees);
+            }
             forwardAmount = a.amount - fees;
         }
         IERC20(a.token).forceApprove(target, 0);
@@ -775,7 +780,7 @@ contract Router is ReentrancyGuard, EIP712, AccessControl {
     ) internal returns (address target, bool isContract, uint256 balBefore) {
         // reuse binding logic
         (target, isContract, balBefore) = _preSignedPullAndChecks(a, intent, signature);
-        if (!isContract && a.payload.length != 0) revert PayloadTooLarge();
+        if (!isContract && a.payload.length != 0) revert PayloadDisallowedToEOA();
         return (target, isContract, balBefore);
     }
 

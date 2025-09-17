@@ -20,6 +20,16 @@
 				"$tsc"
 			],
 			"group": "build"
+		},
+		{
+			"label": "forge-test",
+			"type": "shell",
+			"command": "forge test -q",
+			"isBackground": false,
+			"problemMatcher": [
+				"$gcc"
+			],
+			"group": "build"
 		}
 	]
 }
