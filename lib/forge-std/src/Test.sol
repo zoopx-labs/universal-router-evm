@@ -15,6 +15,10 @@ interface Vm {
     function expectRevert() external;
     function expectRevert(bytes calldata) external;
     function expectRevert(bytes4) external;
+    // Added for log layout test
+    struct Log { bytes32[] topics; bytes data; }
+    function recordLogs() external;
+    function getRecordedLogs() external view returns (Log[] memory);
 }
 
 // A placeholder `vm` variable. In real foundry runs this is injected; here it's declared as an external contract

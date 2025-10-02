@@ -30,15 +30,16 @@ modifier onlyAdapter() {
 ```
 `finalizeMessage` is the only path using this modifier; all other source‑leg flows remain permissionless (user or signed intent driven).
 
-## Replay & Fees (Unchanged)
-- Replay mapping: `usedMessages[messageHash]` still guards `finalizeMessage`.
-- Destination fee distribution: protocolShare + lpShare + relayerFee extracted from the forwarded `amount`, with remainder to the vault.
-- Event telemetry (`FeeApplied`) unchanged; `messageHash` is the indexing key.
+## Replay & Fees (Centralized Settlement Model)
+- Replay mapping: `usedMessages[messageHash]` guards `finalizeMessage` (destination replay‑protection).
+- ALL fee skimming (protocol + relayer) happens on the source leg unless `delegateFeeToTarget[target]` is set (then the vault handles skimming off-chain / internally).
+- `finalizeMessage` on destination ONLY forwards the bridged `amount` to the vault; it does NOT transfer protocol or relayer fees again. It ECHOs the originally supplied `protocolFee` / `relayerFee` in `FeeApplied` for indexing & reconciliation.
+- Future DAO upgrade path: lpRecipient / on-chain splitting can be re-enabled without changing message hash schema.
 
 ## Hashing & BridgeID
 No human-readable BridgeID is stored on-chain. The backend derives a display BridgeID from `messageHash` (e.g., formatting first bytes) and records per-leg tx hashes keyed by `messageHash`.
 
-Source-leg events emit `payloadHash` + `messageHash` + `globalRouteId`. Destination-leg event (`FeeApplied`) emits `messageHash`.
+Source-leg events emit `payloadHash` + `messageHash` + `globalRouteId` together with actual skimmed fees. Destination-leg event (`FeeApplied`) emits `messageHash` plus echoed fee values (informational only if already skimmed).
 
 ## Migration Notes
 - Legacy `adapter` variable retained for layout but ignored for authorization; scripts may optionally still set it for backward analytics compatibility.

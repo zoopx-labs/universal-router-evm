@@ -122,8 +122,8 @@ contract RouterFocusedCoverage is Test {
         router.universalBridgeApproveThenCall(a);
     }
 
-    // additional small test: finalizeMessage flow with LP share path
-    function test_finalize_distribute_shares() public {
+    // finalizeMessage flow with fee share configuration (echo-only; no on-chain distribution in current model)
+    function test_finalize_echo_shares() public {
         // construct fee shares and call finalizeMessage via adapter
         // prepare router config
         vm.prank(admin);

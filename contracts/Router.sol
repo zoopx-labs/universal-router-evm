@@ -79,7 +79,7 @@ contract Router is ReentrancyGuard, EIP712, AccessControl {
         address indexed token,
         address target,
         uint256 forwardedAmount,
-    uint256 /*protocolFee*/,
+        uint256 protocolFee,
         uint256 relayerFee,
         bytes32 payloadHash,
         uint16 srcChainId,
@@ -1000,23 +1000,28 @@ contract Router is ReentrancyGuard, EIP712, AccessControl {
 
     // ---------- Finalizer (adapter-only) ----------
     /**
-     * @notice Finalize a cross-chain message. Only the configured adapter may call this.
-     * Marks the canonical message as used to prevent replay and applies fee splits.
-     * @param globalRouteId canonical route identifier (for indexing/read-side)
-     * @param messageHash canonical message hash (pre-image of GRI)
-     * @param asset ERC20 token to distribute
-     * @param vault recipient vault/pool address for forwarded funds
-     * @param lpRecipient optional LP recipient for LP share
-     * @param amount total forwarded amount that was sent to the destination (includes fees already skimmed)
-     * @param protocolFee native protocol fee amount (passed through for read-side auditing)
-     * @param relayerFee native relayer fee amount; will be forwarded to msg.sender (relayer)
+     * @notice Finalize a cross-chain message. Only an authorized adapter may call this.
+     * @dev Replay-protects the canonical messageHash and forwards the bridged amount to the destination vault.
+     *      IMPORTANT: All fee skimming (protocol + relayer) occurs on the source leg (or is delegated to the
+     *      target/vault via delegateFeeToTarget). This function DOES NOT transfer protocol or relayer fees; it
+     *      merely ECHOs the economic fields (protocolFee, relayerFee, bps splits) in the FeeApplied event so
+     *      off-chain indexers / auditors can reconcile end-to-end without inferring a second on-chain deduction.
+     *      The lpRecipient parameter is retained for forward compatibility (future DAO-controlled LP distributions)
+     *      and is currently unused.
+     * @param globalRouteId Canonical route identifier (deterministic grouping across legs)
+     * @param messageHash Canonical message hash (correlates source + destination legs)
+     * @param asset ERC20 token forwarded
+     * @param vault Recipient vault/pool address for the bridged amount
+     * @param amount Total forwarded amount that arrived on destination
+     * @param protocolFee Echo of source-leg protocol fee (already paid at source)
+     * @param relayerFee Echo of source-leg relayer fee (already paid at source / settled off-chain)
      */
     function finalizeMessage(
         bytes32 globalRouteId,
         bytes32 messageHash,
         address asset,
         address vault,
-        address lpRecipient,
+        address /*lpRecipient*/,
         uint256 amount,
         uint256 protocolFee,
         uint256 relayerFee
@@ -1026,10 +1031,15 @@ contract Router is ReentrancyGuard, EIP712, AccessControl {
         usedMessages[messageHash] = true;
         if (vault == address(0)) revert ZeroAddress();
         IERC20 t = IERC20(asset);
-        // Destination now just forwards entire amount (fees already handled source-side or delegated to vault)
+        // Destination forwards entire bridged amount. All fee skimming occurred at the source leg OR was delegated
+        // to the target/vault (delegateFeeToTarget). We intentionally DO NOT re‑apply or split protocol/relayer/LP
+        // fees here to avoid double accounting. The protocolFee & relayerFee parameters are an ECHO of the
+        // source-leg economics supplied by the backend for audit correlation (trust-based). lpRecipient is kept
+        // for forward compatibility (DAO governed distribution) but currently unused.
         t.safeTransfer(vault, amount);
-        // Emit telemetry with zeroed fee fields to indicate source/vault handling
-        // NOTE: Backend correlates destination leg via messageHash (human BridgeID derived off-chain)
+        // Emit telemetry including the echoed fee values instead of zero so indexers can reconcile source vs dest.
+        // NOTE: Since we do not redistribute here, protocolFee/relayerFee are purely informational (already paid
+        // to feeRecipient at source, or handled off-chain). Consumers MUST NOT assume an on-chain transfer occurred.
         emit FeeApplied(
             globalRouteId,
             messageHash,
@@ -1037,8 +1047,8 @@ contract Router is ReentrancyGuard, EIP712, AccessControl {
             address(this),
             vault,
             asset,
-            0,
-            0,
+            protocolFee,
+            relayerFee,
             protocolShareBps,
             lpShareBps,
             feeCollector,

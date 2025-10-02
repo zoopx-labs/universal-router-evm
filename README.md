@@ -157,3 +157,16 @@ MIT
 ## Additional Documentation
 
 - Adapter Roles & Finalization: `docs/adapter-roles.md`
+
+## Centralized Fee Settlement (Current Mode)
+
+The router skims both `protocolFee` and `relayerFee` on the SOURCE leg (unless `delegateFeeToTarget[target]` is set, in which case the full amount is forwarded and fees are handled by the target/vault). The destination `finalizeMessage` call does NOT perform any distribution; it simply forwards the bridged `amount` and ECHOs the fee values in the `FeeApplied` event for audit correlation. A future DAO-governed contract can replace the simple EOA `feeRecipient` without altering the message hashing schema.
+
+Implications:
+- No double counting: destination side will never move fee tokens again.
+- Relayer compensation presently occurs off-chain (the relayer = operator controlling `feeRecipient`).
+- Upgrading to on-chain splits later will not break existing `messageHash` correlation if implemented as a new function or with append-only storage.
+
+## Hashing Parity
+
+Canonical `messageHash` is produced on-chain by `Hashing.messageHash(uint64 srcChainId, address srcAdapter, address recipient, address asset, uint256 amount, bytes32 payloadHash, uint64 nonce, uint64 dstChainId)` with packed encoding (`abi.encodePacked`) of each field in that exact order. A JavaScript parity test (`test-js/HashingParity.spec.ts`) mirrors this to ensure off-chain indexers derive identical hashes for BridgeID correlation.

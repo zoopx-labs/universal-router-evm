@@ -24,8 +24,8 @@ contract RouterCoverageAdditions is Test {
         token.mint(address(router), 1e18);
     }
 
-    // finalizeMessage path with protocolShare > 0 and relayerFee > 0
-    function test_finalize_with_shares_and_relayerFee() public {
+    // finalizeMessage path with protocolShare > 0 and relayerFee > 0 (echo-only semantics)
+    function test_finalize_echo_with_shares_and_relayerFee() public {
         // set protocol share to 5000 (50%) and lp share to 5000 (50%) for test
         vm.prank(admin);
         router.setFeeSplit(5000, 5000);
